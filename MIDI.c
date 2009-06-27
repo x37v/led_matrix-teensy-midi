@@ -241,10 +241,12 @@ TASK(USB_MIDI_Task)
 							((byte0 & 0x0F) == button_settings[j].chan)){
 						//does the num match
 						if(button_settings[j].num == byte1){
+							uint8_t index = 3 - (j % 4);
+							uint8_t shift = 3 * (j / 4);
 							//clear
-							leds[3 - (j % 4)] &= ~(0x7 << (3 * (j / 4)));
+							leds[index] &= ~(0x7 << shift);
 							//set
-							leds[3 - (j % 4)] |=  (byte2 & 0x7) << (3 * (j / 4));
+							leds[index] |=  (byte2 & 0x7) << shift;
 							break;
 						}
 					} 
