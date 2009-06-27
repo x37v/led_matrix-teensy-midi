@@ -62,6 +62,11 @@ volatile uint16_t button_toggle; //the toggle state.. 1 means down, 0 means up
 
 volatile midi_cc_t button_settings[16];
 
+//remap row, column to an index
+uint8_t index_mapping(uint8_t row, uint8_t col){
+	return row * 4 + (3 - col);
+}
+
 int main(void)
 {
 	uint8_t i, j;
@@ -110,7 +115,13 @@ int main(void)
 		button_settings[i].chan = 0;
 		button_settings[i].num = i;
 		button_settings[i].flags = 0;
-		button_settings[i].color = 0x1 | (0x4 << 3);
+		button_settings[i].color = 0x1;
+	}
+
+	//XXX tmp
+	for(i = 4; i < 8; i++){
+		button_settings[i].flags = BTN_TOGGLE;
+		button_settings[i].color = 0x2 | (0x4 << 3);
 	}
 
 	//init led state [all buttons are up]
@@ -232,11 +243,10 @@ TASK(LEDS_Task)
 
 TASK(BUTTONS_Task)
 {
-	uint8_t row_offset = 4 * row;
 	uint8_t i, j;
 
 	for(i = 0; i < 4; i++){
-		uint8_t index = i + row_offset;
+		uint8_t index = index_mapping(row, i);
 		//zero out the bit we're working with
 		button_history[history] &= ~((uint16_t)(1 << index));
 		//set the bit
@@ -245,7 +255,7 @@ TASK(BUTTONS_Task)
 
 	//debounce
 	for(i = 0; i < 4; i++){
-		uint8_t index = i + row_offset;
+		uint8_t index = index_mapping(row, i);
 		bool down = (bool)(0x1 & (button_history[0] >> index));
 		bool consistent = true;
 		for(j = 1; j < HISTORY; j++){
@@ -257,32 +267,65 @@ TASK(BUTTONS_Task)
 		if(consistent){
 			if(down){
 				if(!((button_last >> index) & 0x1)){
-					//leds[i] |= (0x1 << (2 + 3 * row));
 					button_last |= 1 << index;
-					Buffer_StoreElement(&midiout_buf, 0x80 | button_settings[index].chan);
-					Buffer_StoreElement(&midiout_buf, button_settings[index].num);
-					Buffer_StoreElement(&midiout_buf, 127);
-					//if the LEDS are not midi driven, set them
-					if(!(button_settings[index].flags & BTN_LED_MIDI_DRIVEN)){
-						//clear
-						leds[i] &= ~(0x7 << (3 * row));
-						//set
-						leds[i] |= (button_settings[index].color & 0x7) << (3 * row);
+					//if we're not in toggle mode just send out data
+					if(!(button_settings[index].flags & BTN_TOGGLE)){
+						Buffer_StoreElement(&midiout_buf, 0x80 | button_settings[index].chan);
+						Buffer_StoreElement(&midiout_buf, button_settings[index].num);
+						Buffer_StoreElement(&midiout_buf, 127);
+						//if the LEDS are not midi driven, set them
+						if(!(button_settings[index].flags & BTN_LED_MIDI_DRIVEN)){
+							//clear
+							leds[i] &= ~(0x7 << (3 * row));
+							//set
+							leds[i] |= (button_settings[index].color & 0x7) << (3 * row);
+						}
+						//if we're in toggle mode we have to know the toggle state
+					} else {
+						//swap states
+						button_toggle ^= (uint16_t)(0x1 << index);
+						//down
+						if(button_toggle & (uint16_t)(0x1 << index)){
+							Buffer_StoreElement(&midiout_buf, 0x80 | button_settings[index].chan);
+							Buffer_StoreElement(&midiout_buf, button_settings[index].num);
+							Buffer_StoreElement(&midiout_buf, 127);
+							//if the LEDS are not midi driven, set them
+							if(!(button_settings[index].flags & BTN_LED_MIDI_DRIVEN)){
+								//clear
+								leds[i] &= ~(0x7 << (3 * row));
+								//set
+								leds[i] |= (button_settings[index].color & 0x7) << (3 * row);
+							}
+						} else {
+							//up
+							Buffer_StoreElement(&midiout_buf, 0x80);
+							Buffer_StoreElement(&midiout_buf, index);
+							Buffer_StoreElement(&midiout_buf, 0);
+							//if the LEDS are not midi driven, set them
+							if(!(button_settings[index].flags & BTN_LED_MIDI_DRIVEN)){
+								//clear
+								leds[i] &= ~(0x7 << (3 * row));
+								//set
+								leds[i] |= ((button_settings[index].color >> 3) & 0x7) << (3 * row);
+							}
+						}
 					}
 				}
 			} else {
 				if((button_last >> index) & 0x1){
-					//leds[i] &= ~(0x1 << (2 + 3 * row));
 					button_last &= ~(1 << index);
-					Buffer_StoreElement(&midiout_buf, 0x80);
-					Buffer_StoreElement(&midiout_buf, index);
-					Buffer_StoreElement(&midiout_buf, 0);
-					//if the LEDS are not midi driven, set them
-					if(!(button_settings[index].flags & BTN_LED_MIDI_DRIVEN)){
-						//clear
-						leds[i] &= ~(0x7 << (3 * row));
-						//set
-						leds[i] |= ((button_settings[index].color >> 3) & 0x7) << (3 * row);
+					//in toggle mode we don't do anything on 'up'
+					if(!(button_settings[index].flags & BTN_TOGGLE)){
+						Buffer_StoreElement(&midiout_buf, 0x80);
+						Buffer_StoreElement(&midiout_buf, index);
+						Buffer_StoreElement(&midiout_buf, 0);
+						//if the LEDS are not midi driven, set them
+						if(!(button_settings[index].flags & BTN_LED_MIDI_DRIVEN)){
+							//clear
+							leds[i] &= ~(0x7 << (3 * row));
+							//set
+							leds[i] |= ((button_settings[index].color >> 3) & 0x7) << (3 * row);
+						}
 					}
 				}
 			}
