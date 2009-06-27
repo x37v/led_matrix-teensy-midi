@@ -38,23 +38,6 @@
 
 #define VERSION 1
 #define HISTORY 4
-#define NUMBOARDS 2
-#define ENC_BTN_CC_OFFSET 16
-#define BTN_CC_OFFSET 32
-
-typedef enum {
-	GET_VERSION = 0,
-	GET_NUM_BOARDS = 1,
-	GET_ENCODER_DATA = 2,
-	GET_BUTTON_DATA = 3,
-	SET_ENCODER_DATA = 4,
-	SET_BUTTON_DATA = 5,
-	RET_VERSION = 6,
-	RET_NUM_BOARDS = 7,
-	RET_ENCODER_DATA = 8,
-	RET_BUTTON_DATA = 9,
-	SYSEX_INVALID = 10
-} sysex_t;
 
 /* Includes: */
 #include <avr/io.h>
@@ -69,33 +52,23 @@ typedef enum {
 #include <LUFA/Scheduler/Scheduler.h>                // Simple scheduler for task management
 
 typedef struct {
-	//which midi channel and which cc number (or multiplier)
-	uint8_t chan;
-	uint8_t num;
-} midi_cc_t;
-
-//these are settings for the encoders
-//if set then we send absolute not relative values [and keep a count]
-#define ENC_ABSOLUTE 0x1
-//if set then we only send data when we are at a detent
-#define ENC_DETENT_ONLY 0x2
-//if set then the button acts as a multiplier not its own cc
-#define ENC_BUTTON_MUL 0x10
-
-//falid flags for encoders
-#define ENC_FLAGS (ENC_ABSOLUTE | ENC_DETENT_ONLY | ENC_BUTTON_MUL)
-
-typedef struct {
-	//settings
-	uint8_t flags;
-
 	//which midi channel and which cc number
 	uint8_t chan;
 	uint8_t num;
+	uint8_t flags;
+	//00 rbg rbg [00 upcolor downcolor]
+	uint8_t color;
+} midi_cc_t;
 
-	//button
-	midi_cc_t btn;
-} encoder_t;
+//flags
+
+//are the colors driven by the button state or by midi
+#define BTN_LED_MIDI_DRIVEN 0x1
+//otherwise it is momentary
+#define BTN_TOGGLE 0x2
+
+//valid flags for encoders
+#define BTN_FLAGS (BTN_LED_MIDI_DRIVEN | BTN_TOGGLE)
 
 /* Macros: */
 /** MIDI command for a note on (activation) event */
@@ -116,21 +89,14 @@ typedef struct {
 #define SYSEX_EDUMANUFID 0x7D
 
 //spells 'buzzr' in ascii
-//0, our first product
-const uint8_t sysex_header[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 0};
+//1, our 2nd product
+const uint8_t sysex_header[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 1};
 #define SYSEX_HEADER_SIZE 7
 
 //just the header back
-const uint8_t sysex_ack[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 0};
+const uint8_t sysex_ack[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 1};
 #define SYSEX_ACK_SIZE 7
 
-//the header, code, boardcount
-const uint8_t sysex_boards[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 0, RET_NUM_BOARDS, NUMBOARDS};
-#define SYSEX_BOARD_CNT_SIZE 9
-
-//the header, code, version
-const uint8_t sysex_version[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 0, RET_VERSION, VERSION};
-#define SYSEX_VERSION_SIZE 9
 
 /** Convenience macro. MIDI channels are numbered from 1-10 (natural numbers) however the logical channel
  *  addresses are zero-indexed. This converts a natural MIDI channel number into the logical channel address.

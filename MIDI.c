@@ -52,18 +52,19 @@ TASK_LIST
 //hold the data to send
 RingBuff_t midiout_buf;
 
-#define HISTORY 4
-
 volatile uint16_t leds[4];
 volatile uint8_t led_col;
 volatile uint8_t row;
 volatile uint8_t history;
 volatile uint16_t button_history[HISTORY];
 volatile uint16_t button_last;
+volatile uint16_t button_toggle; //the toggle state.. 1 means down, 0 means up
+
+volatile midi_cc_t button_settings[16];
 
 int main(void)
 {
-	uint8_t i;
+	uint8_t i, j;
 
 	row = 0;
 	history = 0;
@@ -98,12 +99,26 @@ int main(void)
 
 	PORTB = (PORTB & 0x0F) | ~(0x10 << row);
 
+	//init history and settings
 	for(i = 0; i < 4; i++)
 		leds[0] = 0;
 	for(i = 0; i < HISTORY; i++)
 		button_history[i] = 0;
-	button_last = 0;
+	button_toggle = button_last = 0;
 
+	for(i = 0; i < 16; i++){
+		button_settings[i].chan = 0;
+		button_settings[i].num = i;
+		button_settings[i].flags = 0;
+		button_settings[i].color = 0x1 | (0x4 << 3);
+	}
+
+	//init led state [all buttons are up]
+	for(i = 0; i < 4; i++){
+		for(j = 0; j < 4; j++){
+			leds[i] |= ((button_settings[i + j * 4].color >> 3) & 0x7) << (3 * j);
+		}
+	}
 
 	/* Indicate USB not ready */
 	UpdateStatus(Status_USBNotReady);
@@ -221,38 +236,54 @@ TASK(BUTTONS_Task)
 	uint8_t i, j;
 
 	for(i = 0; i < 4; i++){
+		uint8_t index = i + row_offset;
 		//zero out the bit we're working with
-		button_history[history] &= ~((uint16_t)(1 << (i + row_offset)));
+		button_history[history] &= ~((uint16_t)(1 << index));
 		//set the bit
-		button_history[history] |= (uint16_t)((~PINC >> (1 + (i * 2))) & 0x1) << (i + row_offset);
+		button_history[history] |= (uint16_t)((~PINC >> (1 + (i * 2))) & 0x1) << index;
 	}
 
 	//debounce
 	for(i = 0; i < 4; i++){
-		bool down = (bool)(0x1 & (button_history[0] >> (i + row_offset)));
+		uint8_t index = i + row_offset;
+		bool down = (bool)(0x1 & (button_history[0] >> index));
 		bool consistent = true;
 		for(j = 1; j < HISTORY; j++){
-			if(down != (bool)(0x1 & (button_history[j] >> (i + row_offset)))){
+			if(down != (bool)(0x1 & (button_history[j] >> index))){
 				consistent = false;
 				break;
 			}
 		}
 		if(consistent){
 			if(down){
-				if(!((button_last >> (i + row_offset)) & 0x1)){
-					leds[i] |= (0x1 << (2 + 3 * row));
-					button_last |= 1 << (i + row_offset);
-					Buffer_StoreElement(&midiout_buf, 0x80);
-					Buffer_StoreElement(&midiout_buf, (i + row_offset));
+				if(!((button_last >> index) & 0x1)){
+					//leds[i] |= (0x1 << (2 + 3 * row));
+					button_last |= 1 << index;
+					Buffer_StoreElement(&midiout_buf, 0x80 | button_settings[index].chan);
+					Buffer_StoreElement(&midiout_buf, button_settings[index].num);
 					Buffer_StoreElement(&midiout_buf, 127);
+					//if the LEDS are not midi driven, set them
+					if(!(button_settings[index].flags & BTN_LED_MIDI_DRIVEN)){
+						//clear
+						leds[i] &= ~(0x7 << (3 * row));
+						//set
+						leds[i] |= (button_settings[index].color & 0x7) << (3 * row);
+					}
 				}
 			} else {
-				if((button_last >> (i + row_offset)) & 0x1){
-					leds[i] &= ~(0x1 << (2 + 3 * row));
-					button_last &= ~(1 << (i + row_offset));
+				if((button_last >> index) & 0x1){
+					//leds[i] &= ~(0x1 << (2 + 3 * row));
+					button_last &= ~(1 << index);
 					Buffer_StoreElement(&midiout_buf, 0x80);
-					Buffer_StoreElement(&midiout_buf, (i + row_offset));
+					Buffer_StoreElement(&midiout_buf, index);
 					Buffer_StoreElement(&midiout_buf, 0);
+					//if the LEDS are not midi driven, set them
+					if(!(button_settings[index].flags & BTN_LED_MIDI_DRIVEN)){
+						//clear
+						leds[i] &= ~(0x7 << (3 * row));
+						//set
+						leds[i] |= ((button_settings[index].color >> 3) & 0x7) << (3 * row);
+					}
 				}
 			}
 		}
