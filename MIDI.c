@@ -60,7 +60,14 @@ volatile uint16_t button_history[HISTORY];
 volatile uint16_t button_last;
 volatile uint16_t button_toggle; //the toggle state.. 1 means down, 0 means up
 
-volatile midi_cc_t button_settings[16];
+volatile bool send_ack;
+volatile bool send_version;
+volatile bool sysex_in;
+volatile uint8_t sysex_in_cnt;
+volatile sysex_t sysex_in_type;
+volatile uint8_t sysex_setting_index;
+
+volatile midi_cc_t button_settings[NUM_BUTTONS];
 
 //remap row, column to an index
 uint8_t index_mapping(uint8_t row, uint8_t col){
@@ -111,7 +118,7 @@ int main(void)
 		button_history[i] = 0;
 	button_toggle = button_last = 0;
 
-	for(i = 0; i < 16; i++){
+	for(i = 0; i < NUM_BUTTONS; i++){
 		button_settings[i].chan = 0;
 		button_settings[i].num = i;
 		button_settings[i].flags = BTN_LED_MIDI_DRIVEN;
@@ -132,6 +139,11 @@ int main(void)
 				leds[i] |= ((button_settings[i + j * 4].color >> 3) & 0x7) << (3 * j);
 		}
 	}
+
+	send_version = send_ack = false;
+	sysex_in = false;
+	sysex_in_cnt = 0;
+	sysex_in_type = SYSEX_INVALID;
 
 	/* Indicate USB not ready */
 	UpdateStatus(Status_USBNotReady);
@@ -206,6 +218,16 @@ TASK(USB_MIDI_Task)
 	/* Check if endpoint is ready to be written to */
 	if (Endpoint_IsINReady())
 	{
+		if(send_ack){
+			send_ack = false;
+			while (!(Endpoint_IsINReady()));
+			SendSysex(sysex_ack, SYSEX_ACK_SIZE, 0);
+		} else if(send_version){
+			send_version = false;
+			while (!(Endpoint_IsINReady()));
+			SendSysex(sysex_version, SYSEX_VERSION_SIZE, 0);
+		}
+
 		if (midiout_buf.Elements > 2){
 			/* Wait until Serial Tx Endpoint Ready for Read/Write */
 			while (!(Endpoint_IsINReady()));
@@ -229,27 +251,123 @@ TASK(USB_MIDI_Task)
 
 	if (Endpoint_IsOUTReceived()){
 		while (Endpoint_BytesInEndpoint()){
+			uint8_t byte[3];
 			//always comes in packets of 4 bytes
 			Endpoint_Read_Byte();
 			//ditch the first byte and grab the next 3
-			uint8_t byte0 = Endpoint_Read_Byte();
-			uint8_t byte1 = Endpoint_Read_Byte();
-			uint8_t byte2 = Endpoint_Read_Byte();
-			if((byte0 & 0xF0) == MIDI_COMMAND_CC){
-				for(j = 0; j < 16; j++){
+			byte[0] = Endpoint_Read_Byte();
+			byte[1] = Endpoint_Read_Byte();
+			byte[2] = Endpoint_Read_Byte();
+
+			//if this is a CC input deal with that
+			if((byte[0] & 0xF0) == MIDI_COMMAND_CC){
+				sysex_in = false;
+				for(j = 0; j < NUM_BUTTONS; j++){
 					if((button_settings[j].flags & BTN_LED_MIDI_DRIVEN) &&
-							((byte0 & 0x0F) == button_settings[j].chan)){
+							((byte[0] & 0x0F) == button_settings[j].chan)){
 						//does the num match
-						if(button_settings[j].num == byte1){
+						if(button_settings[j].num == byte[1]){
 							uint8_t index = 3 - (j % 4);
 							uint8_t shift = 3 * (j / 4);
 							//clear
 							leds[index] &= ~(0x7 << shift);
 							//set
-							leds[index] |=  (byte2 & 0x7) << shift;
+							leds[index] |=  (byte[2] & 0x7) << shift;
 							break;
 						}
 					} 
+				}
+			} else {
+				for(i = 0; i < 3; i++){
+					//otherwise, maybe it is sysex data?
+					if(byte[i] == SYSEX_BEGIN){
+						sysex_in = true;
+						sysex_in_cnt = 0;
+					} else if(byte[i] == SYSEX_END){
+						//if we were in sysex mode and we just got a header [just a ping]
+						//send an ack
+						if(sysex_in && sysex_in_cnt == SYSEX_HEADER_SIZE)
+							send_ack = true;
+						sysex_in = false;
+						break;
+					} else if(byte[i] & 0x80){
+						sysex_in = false;
+						break;
+					} else if(sysex_in){
+						//match the header
+						if(sysex_in_cnt < SYSEX_HEADER_SIZE){
+							if(!sysex_header[sysex_in_cnt] == byte[i]){
+								sysex_in = false;
+								break;
+							}
+						} else {
+							//here we have matched the header and we're parsing input data
+							uint8_t index = sysex_in_cnt - SYSEX_HEADER_SIZE;
+							//if the index is 0 then we're matching the type
+							if(index == 0){
+								if(byte[i] == GET_VERSION){
+									send_version = true;
+									sysex_in = false;
+									break;
+								} else if (byte[i] < SYSEX_INVALID){
+									sysex_in_type = byte[i];
+								} else {
+									sysex_in_type = SYSEX_INVALID;
+									sysex_in = false;
+									break;
+								}
+							} else if(index == 1){
+								if (sysex_in_type == SET_BUTTON_DATA)
+									sysex_setting_index = byte[i];
+								else if(sysex_in_type == GET_BUTTON_DATA){
+									if(byte[i] < NUM_BUTTONS){
+										//Buffer_StoreElement(&cmd_buf, 0x80 | SEND_BUTTON);
+										//Buffer_StoreElement(&cmd_buf, byte[i]);
+									}
+									sysex_in = false;
+									sysex_in_type = SYSEX_INVALID;
+								}
+							} else if(index > 1) { 
+								if(sysex_in_type == SET_BUTTON_DATA){
+									//make sure we're in range
+									if(sysex_setting_index < NUM_BUTTONS){
+										switch(index){
+											case 2:
+												button_settings[sysex_setting_index].chan = byte[i] & 0x0F;
+												break;
+											case 3:
+												button_settings[sysex_setting_index].num = byte[i] & 0x7F;
+												break;
+											case 4:
+												button_settings[sysex_setting_index].flags = byte[i];
+												break;
+											case 5:
+												button_settings[sysex_setting_index].color = byte[i] & 0x3F;
+												//clear
+												leds[3 - (sysex_setting_index % 4)] &= ~(0x7 << (3 * (sysex_setting_index / 4)));
+												//set
+												leds[3 - (sysex_setting_index % 4)] |= 
+													((button_settings[sysex_setting_index].color >> 3) & 0x7) << (3 * (sysex_setting_index / 4));
+												break;
+											default:
+												sysex_in = false;
+												sysex_in_type = SYSEX_INVALID;
+												break;
+										}
+									} else {
+										sysex_in = false;
+										sysex_in_type = SYSEX_INVALID;
+										break;
+									}
+								} else {
+									sysex_in = false;
+									sysex_in_type = SYSEX_INVALID;
+									break;
+								}
+							}
+						}
+						sysex_in_cnt++;
+					}
 				}
 			}
 		}
@@ -328,8 +446,8 @@ TASK(BUTTONS_Task)
 							}
 						} else {
 							//up
-							Buffer_StoreElement(&midiout_buf, 0x80);
-							Buffer_StoreElement(&midiout_buf, index);
+							Buffer_StoreElement(&midiout_buf, 0x80 | button_settings[index].chan);
+							Buffer_StoreElement(&midiout_buf, button_settings[index].num);
 							Buffer_StoreElement(&midiout_buf, 0);
 							//if the LEDS are not midi driven, set them
 							if(!(button_settings[index].flags & BTN_LED_MIDI_DRIVEN)){
@@ -346,8 +464,8 @@ TASK(BUTTONS_Task)
 					button_last &= ~(1 << index);
 					//in toggle mode we don't do anything on 'up'
 					if(!(button_settings[index].flags & BTN_TOGGLE)){
-						Buffer_StoreElement(&midiout_buf, 0x80);
-						Buffer_StoreElement(&midiout_buf, index);
+						Buffer_StoreElement(&midiout_buf, 0x80 | button_settings[index].chan);
+						Buffer_StoreElement(&midiout_buf, button_settings[index].num);
 						Buffer_StoreElement(&midiout_buf, 0);
 						//if the LEDS are not midi driven, set them
 						if(!(button_settings[index].flags & BTN_LED_MIDI_DRIVEN)){

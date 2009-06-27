@@ -38,6 +38,7 @@
 
 #define VERSION 1
 #define HISTORY 4
+#define NUM_BUTTONS 16
 
 /* Includes: */
 #include <avr/io.h>
@@ -88,6 +89,14 @@ typedef struct {
 //This ID is for educational or development use only
 #define SYSEX_EDUMANUFID 0x7D
 
+typedef enum {
+	GET_VERSION = 0,
+	GET_BUTTON_DATA = 1,
+	SET_BUTTON_DATA = 2,
+	RET_VERSION = 3,
+	SYSEX_INVALID = 3
+} sysex_t;
+
 //spells 'buzzr' in ascii
 //1, our 2nd product
 const uint8_t sysex_header[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 1};
@@ -96,6 +105,10 @@ const uint8_t sysex_header[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 1};
 //just the header back
 const uint8_t sysex_ack[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 1};
 #define SYSEX_ACK_SIZE 7
+
+//the header, code, version
+const uint8_t sysex_version[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 1, RET_VERSION, VERSION};
+#define SYSEX_VERSION_SIZE 9
 
 
 /** Convenience macro. MIDI channels are numbered from 1-10 (natural numbers) however the logical channel
