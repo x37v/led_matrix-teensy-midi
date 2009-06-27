@@ -114,20 +114,22 @@ int main(void)
 	for(i = 0; i < 16; i++){
 		button_settings[i].chan = 0;
 		button_settings[i].num = i;
-		button_settings[i].flags = 0;
+		button_settings[i].flags = BTN_LED_MIDI_DRIVEN;
 		button_settings[i].color = 0x1;
 	}
 
 	//XXX tmp
 	for(i = 4; i < 8; i++){
-		button_settings[i].flags = BTN_TOGGLE;
+		button_settings[i].flags = BTN_TOGGLE | BTN_LED_MIDI_DRIVEN;
 		button_settings[i].color = 0x2 | (0x4 << 3);
 	}
 
 	//init led state [all buttons are up]
 	for(i = 0; i < 4; i++){
 		for(j = 0; j < 4; j++){
-			leds[i] |= ((button_settings[i + j * 4].color >> 3) & 0x7) << (3 * j);
+			//if the leds are being driven by MIDI then don't set them
+			if(!(button_settings[i + j * 4].flags & BTN_LED_MIDI_DRIVEN))
+				leds[i] |= ((button_settings[i + j * 4].color >> 3) & 0x7) << (3 * j);
 		}
 	}
 
@@ -197,6 +199,7 @@ EVENT_HANDLER(USB_ConfigurationChanged)
  */
 TASK(USB_MIDI_Task)
 {
+	uint8_t i, j;
 	/* Select the MIDI IN stream */
 	Endpoint_SelectEndpoint(MIDI_STREAM_IN_EPNUM);
 
@@ -224,8 +227,33 @@ TASK(USB_MIDI_Task)
 	/* Select the MIDI OUT stream */
 	Endpoint_SelectEndpoint(MIDI_STREAM_OUT_EPNUM);
 
-	// Clear the endpoint buffer
-	Endpoint_ClearOUT();
+	if (Endpoint_IsOUTReceived()){
+		while (Endpoint_BytesInEndpoint()){
+			//always comes in packets of 4 bytes
+			Endpoint_Read_Byte();
+			//ditch the first byte and grab the next 3
+			uint8_t byte0 = Endpoint_Read_Byte();
+			uint8_t byte1 = Endpoint_Read_Byte();
+			uint8_t byte2 = Endpoint_Read_Byte();
+			if((byte0 & 0xF0) == MIDI_COMMAND_CC){
+				for(j = 0; j < 16; j++){
+					if((button_settings[j].flags & BTN_LED_MIDI_DRIVEN) &&
+							((byte0 & 0x0F) == button_settings[j].chan)){
+						//does the num match
+						if(button_settings[j].num == byte1){
+							//clear
+							leds[3 - (j % 4)] &= ~(0x7 << (3 * (j / 4)));
+							//set
+							leds[3 - (j % 4)] |=  (byte2 & 0x7) << (3 * (j / 4));
+							break;
+						}
+					} 
+				}
+			}
+		}
+		// Clear the endpoint buffer
+		Endpoint_ClearOUT();
+	}
 }
 
 TASK(LEDS_Task)
