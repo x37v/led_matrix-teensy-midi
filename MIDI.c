@@ -1,5 +1,5 @@
 /*
- * Modified by Alex Norman 6/3/2009 to work with the Encoder Board
+ * Modified by Alex Norman 6/29/2009 to work with the LED matrix
  LUFA Library
  Copyright (C) Dean Camera, 2009.
 
@@ -40,6 +40,23 @@
 #include <util/delay.h>
 #include <avr/eeprom.h>
 
+//spells 'buzzr' in ascii
+//1, our 2nd product
+const uint8_t sysex_header[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 1};
+#define SYSEX_HEADER_SIZE 7
+
+//just the header back
+const uint8_t sysex_ack[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 1};
+#define SYSEX_ACK_SIZE 7
+
+//the header, code, version
+const uint8_t sysex_version[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 1, RET_VERSION, VERSION};
+#define SYSEX_VERSION_SIZE 9
+
+//index, chan, num, flags, color
+uint8_t sysex_button_data[] = {SYSEX_EDUMANUFID, 98, 117, 122, 122, 114, 1, RET_BUTTON_DATA, 0, 1, 2, 3, 4};
+#define SYSEX_BUTTON_DATA_SIZE 13
+
 /* Scheduler Task List */
 TASK_LIST
 {
@@ -51,6 +68,8 @@ TASK_LIST
 
 //hold the data to send
 RingBuff_t midiout_buf;
+//to hold commands
+RingBuff_t cmd_buf;
 
 volatile uint16_t leds[4];
 volatile uint8_t led_col;
@@ -91,6 +110,7 @@ int main(void)
 
 	//init ringbuffers
 	Buffer_Initialize(&midiout_buf);
+	Buffer_Initialize(&cmd_buf);
 
 	//LED ground outputs and switch inputs
 	DDRC = 0x55;
@@ -222,10 +242,25 @@ TASK(USB_MIDI_Task)
 			send_ack = false;
 			while (!(Endpoint_IsINReady()));
 			SendSysex(sysex_ack, SYSEX_ACK_SIZE, 0);
-		} else if(send_version){
+		}
+		if(send_version){
 			send_version = false;
 			while (!(Endpoint_IsINReady()));
 			SendSysex(sysex_version, SYSEX_VERSION_SIZE, 0);
+		}
+
+		while(cmd_buf.Elements){
+			i = Buffer_GetElement(&cmd_buf);
+			//fill the buffer
+			//index, chan, num, flags, color
+			button_settings[i].num;
+			sysex_button_data[SYSEX_BUTTON_DATA_SIZE - 5] = i;
+			sysex_button_data[SYSEX_BUTTON_DATA_SIZE - 4] = button_settings[i].chan;
+			sysex_button_data[SYSEX_BUTTON_DATA_SIZE - 3] = button_settings[i].num;
+			sysex_button_data[SYSEX_BUTTON_DATA_SIZE - 2] = button_settings[i].flags;
+			sysex_button_data[SYSEX_BUTTON_DATA_SIZE - 1] = button_settings[i].color;
+			while (!(Endpoint_IsINReady()));
+			SendSysex(sysex_button_data, SYSEX_BUTTON_DATA_SIZE, 0);
 		}
 
 		if (midiout_buf.Elements > 2){
@@ -253,7 +288,7 @@ TASK(USB_MIDI_Task)
 		while (Endpoint_BytesInEndpoint()){
 			uint8_t byte[3];
 			//always comes in packets of 4 bytes
-			Endpoint_Read_Byte();
+			byte[0] = Endpoint_Read_Byte();
 			//ditch the first byte and grab the next 3
 			byte[0] = Endpoint_Read_Byte();
 			byte[1] = Endpoint_Read_Byte();
@@ -320,10 +355,8 @@ TASK(USB_MIDI_Task)
 								if (sysex_in_type == SET_BUTTON_DATA)
 									sysex_setting_index = byte[i];
 								else if(sysex_in_type == GET_BUTTON_DATA){
-									if(byte[i] < NUM_BUTTONS){
-										//Buffer_StoreElement(&cmd_buf, 0x80 | SEND_BUTTON);
-										//Buffer_StoreElement(&cmd_buf, byte[i]);
-									}
+									if(byte[i] < NUM_BUTTONS)
+										Buffer_StoreElement(&cmd_buf, byte[i]);
 									sysex_in = false;
 									sysex_in_type = SYSEX_INVALID;
 								}
@@ -348,7 +381,8 @@ TASK(USB_MIDI_Task)
 												//set
 												leds[3 - (sysex_setting_index % 4)] |= 
 													((button_settings[sysex_setting_index].color >> 3) & 0x7) << (3 * (sysex_setting_index / 4));
-												break;
+												send_ack = true;
+												//just fall through
 											default:
 												sysex_in = false;
 												sysex_in_type = SYSEX_INVALID;
