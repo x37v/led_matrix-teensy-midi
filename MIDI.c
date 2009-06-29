@@ -71,6 +71,7 @@ RingBuff_t midiout_buf;
 //to hold commands
 RingBuff_t cmd_buf;
 
+
 volatile uint16_t leds[4];
 volatile uint8_t led_col;
 volatile uint8_t row;
@@ -87,6 +88,9 @@ volatile sysex_t sysex_in_type;
 volatile uint8_t sysex_setting_index;
 
 volatile midi_cc_t button_settings[NUM_BUTTONS];
+
+//eeprom stuff!
+midi_cc_t EEMEM saved_button_settings[NUM_BUTTONS];
 
 //remap row, column to an index
 uint8_t index_mapping(uint8_t row, uint8_t col){
@@ -139,25 +143,18 @@ int main(void)
 	button_toggle = button_last = 0;
 
 	for(i = 0; i < NUM_BUTTONS; i++){
-		button_settings[i].chan = 0;
-		button_settings[i].num = i;
-		button_settings[i].flags = BTN_LED_MIDI_DRIVEN;
-		button_settings[i].color = 0x1;
-	}
-
-	//XXX tmp
-	for(i = 4; i < 8; i++){
-		button_settings[i].flags = BTN_TOGGLE | BTN_LED_MIDI_DRIVEN;
-		button_settings[i].color = 0x2 | (0x4 << 3);
-	}
-
-	//init led state [all buttons are up]
-	for(i = 0; i < 4; i++){
-		for(j = 0; j < 4; j++){
-			//if the leds are being driven by MIDI then don't set them
-			if(!(button_settings[i + j * 4].flags & BTN_LED_MIDI_DRIVEN))
-				leds[i] |= ((button_settings[i + j * 4].color >> 3) & 0x7) << (3 * j);
-		}
+		//read in saved settings
+		eeprom_busy_wait();
+		button_settings[i].chan = 0x0F & eeprom_read_byte((void *)&(saved_button_settings[i].chan));
+		eeprom_busy_wait();
+		button_settings[i].num = 0x7F & eeprom_read_byte((void *)&(saved_button_settings[i].num));
+		eeprom_busy_wait();
+		button_settings[i].flags = BTN_FLAGS & eeprom_read_byte((void *)&(saved_button_settings[i].flags));
+		eeprom_busy_wait();
+		button_settings[i].color = 0x3F & eeprom_read_byte((void *)&(saved_button_settings[i].color));
+		//init led state [all buttons are up]
+		if(!(button_settings[i].flags & BTN_LED_MIDI_DRIVEN))
+			leds[3 - (i % 4)] |= ((button_settings[i].color >> 3) & 0x7) << (3 * (i / 4));
 	}
 
 	send_version = send_ack = false;
@@ -364,15 +361,28 @@ TASK(USB_MIDI_Task)
 								if(sysex_in_type == SET_BUTTON_DATA){
 									//make sure we're in range
 									if(sysex_setting_index < NUM_BUTTONS){
+										//save both to ram and eeprom [for later use]
 										switch(index){
 											case 2:
 												button_settings[sysex_setting_index].chan = byte[i] & 0x0F;
+												eeprom_busy_wait();
+												eeprom_write_byte(
+														(void *)&(saved_button_settings[ sysex_setting_index].chan),
+														button_settings[sysex_setting_index].chan);
 												break;
 											case 3:
 												button_settings[sysex_setting_index].num = byte[i] & 0x7F;
+												eeprom_busy_wait();
+												eeprom_write_byte(
+														(void *)&(saved_button_settings[sysex_setting_index].num),
+														button_settings[sysex_setting_index].num);
 												break;
 											case 4:
 												button_settings[sysex_setting_index].flags = byte[i];
+												eeprom_busy_wait();
+												eeprom_write_byte(
+														(void *)&(saved_button_settings[sysex_setting_index].flags),
+														button_settings[sysex_setting_index].flags);
 												break;
 											case 5:
 												button_settings[sysex_setting_index].color = byte[i] & 0x3F;
@@ -381,6 +391,10 @@ TASK(USB_MIDI_Task)
 												//set
 												leds[3 - (sysex_setting_index % 4)] |= 
 													((button_settings[sysex_setting_index].color >> 3) & 0x7) << (3 * (sysex_setting_index / 4));
+												eeprom_busy_wait();
+												eeprom_write_byte(
+														(void *)&(saved_button_settings[sysex_setting_index].color),
+														button_settings[sysex_setting_index].color);
 												send_ack = true;
 												//just fall through
 											default:
