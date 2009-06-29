@@ -1,4 +1,4 @@
-#N canvas 63 3 936 707 10;
+#N canvas 63 15 936 707 10;
 #N canvas 140 177 756 402 ping 0;
 #X obj 238 24 sysexin;
 #X obj 238 48 x37v-sysex2list;
@@ -47,7 +47,7 @@
 #X connect 3 0 0 0;
 #X connect 4 0 1 0;
 #X restore 784 146 pd get version;
-#N canvas 411 68 463 560 guts 0;
+#N canvas 403 150 463 560 guts 0;
 #X msg 10 50 label \$1;
 #X obj 10 8 r \$0-version;
 #X obj 10 29 makefilename fw_version-%d;
@@ -105,6 +105,9 @@
 #X obj -36 498 x37v-list2sysex;
 #X obj -36 394 list prepend 2;
 #X obj -36 525 midiout;
+#X obj 24 191 s \$0-version_label;
+#X msg 24 170 label fw_version;
+#X obj 24 148 loadbang;
 #X connect 0 0 3 0;
 #X connect 1 0 2 0;
 #X connect 2 0 0 0;
@@ -127,6 +130,8 @@
 #X connect 22 1 21 0;
 #X connect 23 0 25 0;
 #X connect 24 0 22 0;
+#X connect 27 0 26 0;
+#X connect 28 0 27 0;
 #X restore 678 12 pd guts;
 #X obj 176 191 r \$0-button_get;
 #X obj 176 346 s \$0-button_set;
