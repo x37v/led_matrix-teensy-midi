@@ -38,7 +38,7 @@
 
 #define VERSION 1
 #define HISTORY 4
-#define NUM_BUTTONS 16
+#define NUM_BOARDS 2
 
 /* Includes: */
 #include <avr/io.h>

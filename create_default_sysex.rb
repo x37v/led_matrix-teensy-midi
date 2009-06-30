@@ -1,4 +1,4 @@
-NUM_BOARDS = 1
+NUM_BOARDS = 2
 SYSEX_FILE = "default.syx"
 
 #dev, buzzr, 1
@@ -12,7 +12,7 @@ BTN_LED_MIDI_DRIVEN = 0x1
 BTN_TOGGLE = 0x2
 
 File.open(SYSEX_FILE, "w"){ |f|
-  #encoders
+  #buttons
   (NUM_BOARDS * 16).times do |i|
     f.print SYSEX_BEGIN.chr
     SYSEX_HEADER.each do |h|
