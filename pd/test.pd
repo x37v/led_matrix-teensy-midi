@@ -12,7 +12,7 @@
 #X obj 117 54 tgl 15 0 empty empty empty 17 7 0 10 -262144 -1 -1 0
 1;
 #X obj 180 38 hsl 128 15 1 127 0 0 empty empty empty -2 -8 0 10 -262144
--1 -1 200 1;
+-1 -1 0 1;
 #X obj 594 144 until;
 #X obj 594 81 t b b;
 #X msg 642 113 0;
@@ -34,7 +34,7 @@
 #X obj 503 269 tgl 15 0 empty empty empty 17 7 0 10 -262144 -1 -1 1
 1;
 #X obj 566 264 hsl 128 15 1 127 0 0 empty empty empty -2 -8 0 10 -262144
--1 -1 5500 1;
+-1 -1 11700 1;
 #X obj 535 317 == 0;
 #X msg 575 373 1 0 1;
 #X msg 503 370 4 0 1;
@@ -56,8 +56,8 @@
 #X obj 159 215 random 32;
 #X msg 594 114 32;
 #X msg 745 337 32;
-#X msg 518 395 1 16 1;
-#X msg 580 397 4 16 1;
+#X msg 518 395 1 8 1;
+#X msg 580 397 4 8 1;
 #X connect 0 0 7 0;
 #X connect 1 0 2 0;
 #X connect 1 1 2 1;

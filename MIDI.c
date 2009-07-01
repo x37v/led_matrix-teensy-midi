@@ -261,8 +261,14 @@ TASK(USB_MIDI_Task)
 
 		while(cmd_buf.Elements){
 			uint8_t index = Buffer_GetElement(&cmd_buf);
-			i = index / BTN_PER_BOARD;
-			j = index % BTN_PER_BOARD;
+			if (NUM_BOARDS == 0){
+				i = 0;
+				j = index;
+			} else {
+				//remap so that we count across columns
+				i = (index % 8) / 4;
+				j = index - 4 * (index / 4) + 4 * (index / 8);
+			}
 			//fill the buffer
 			//index, chan, num, flags, color
 			button_settings[i][j].num;
@@ -369,7 +375,7 @@ TASK(USB_MIDI_Task)
 								if (sysex_in_type == SET_BUTTON_DATA)
 									sysex_setting_index = byte[i];
 								else if(sysex_in_type == GET_BUTTON_DATA){
-									if(byte[i] < BTN_PER_BOARD)
+									if(byte[i] < (BTN_PER_BOARD * NUM_BOARDS))
 										Buffer_StoreElement(&cmd_buf, byte[i]);
 									sysex_in = false;
 									sysex_in_type = SYSEX_INVALID;
@@ -378,8 +384,17 @@ TASK(USB_MIDI_Task)
 								if(sysex_in_type == SET_BUTTON_DATA){
 									//make sure we're in range
 									if(sysex_setting_index < (BTN_PER_BOARD * NUM_BOARDS)){
-										uint8_t board = sysex_setting_index / BTN_PER_BOARD;
-										uint8_t btn = sysex_setting_index % BTN_PER_BOARD;
+										uint8_t board;
+										uint8_t btn;
+										if (NUM_BOARDS == 0){
+											board = 0;
+											btn = sysex_setting_index;
+										} else {
+											//remap so that we count across columns
+											board = (sysex_setting_index % 8) / 4;
+											btn = sysex_setting_index - 4 * (sysex_setting_index / 4)
+												+ 4 * (sysex_setting_index / 8);
+										}
 										//save both to ram and eeprom [for later use]
 										switch(index){
 											case 2:
